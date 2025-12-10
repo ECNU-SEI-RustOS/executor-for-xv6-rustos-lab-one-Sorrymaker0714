@@ -39,6 +39,7 @@ pub trait Syscall {
     fn sys_link(&mut self) -> SysResult;
     fn sys_mkdir(&mut self) -> SysResult;
     fn sys_close(&mut self) -> SysResult;
+    fn sys_trace(&mut self) -> SysResult;
 }
 
 impl Syscall for Proc {
@@ -498,7 +499,17 @@ impl Syscall for Proc {
         drop(file);
         Ok(0)
     }
+    
+    
+    /// 设置当前进程的系统调用追踪掩码
+    fn sys_trace(&mut self) -> SysResult {
+        let mask = self.arg_i32(0);
+        let pd = self.data.get_mut();
+        pd.trace_mask = mask as u32;
+        Ok(0)
+    }
 }
+
 
 // LTODO - switch to macro that can include line numbers
 #[inline]

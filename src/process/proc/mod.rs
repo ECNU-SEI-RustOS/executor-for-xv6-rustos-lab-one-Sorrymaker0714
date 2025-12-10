@@ -25,6 +25,33 @@ use self::syscall::Syscall;
 mod syscall;
 mod elf;
 
+// 按 syscall 号映射到名字，0 号不用
+const SYSCALL_NAMES: [&str; 23] = [
+    "",          // 0
+    "fork",      // 1
+    "exit",      // 2
+    "wait",      // 3
+    "pipe",      // 4
+    "read",      // 5
+    "kill",      // 6
+    "exec",      // 7
+    "fstat",     // 8
+    "chdir",     // 9
+    "dup",       // 10
+    "getpid",    // 11
+    "sbrk",      // 12
+    "sleep",     // 13
+    "uptime",    // 14
+    "open",      // 15
+    "write",     // 16
+    "mknod",     // 17
+    "unlink",    // 18
+    "link",      // 19
+    "mkdir",     // 20
+    "close",     // 21
+    "trace",     // 22
+];
+
 /// 进程状态枚举类型，表示操作系统内核中进程的不同生命周期状态。
 ///
 /// 该枚举用于进程调度与管理，反映进程当前的执行或等待状态，
@@ -102,6 +129,8 @@ pub struct ProcData {
     pub pagetable: Option<Box<PageTable>>,
     /// 进程当前工作目录的 inode。
     pub cwd: Option<Inode>,
+    /// 系统调用追踪掩码，由 sys_trace 设置
+    pub trace_mask: u32,
 }
 
 
@@ -116,6 +145,7 @@ impl ProcData {
             tf: ptr::null_mut(),
             pagetable: None,
             cwd: None,
+            trace_mask: 0,
         }
     }
 
@@ -283,6 +313,7 @@ impl ProcData {
             pgt.dealloc_proc_pagetable(self.sz);
         }
         self.sz = 0;
+        self.trace_mask = 0;
     }
 
     /// # 功能说明
@@ -520,15 +551,30 @@ impl Proc {
             19 => self.sys_link(),
             20 => self.sys_mkdir(),
             21 => self.sys_close(),
+            22 => self.sys_trace(),
             _ => {
                 panic!("unknown syscall num: {}", a7);
             }
         };
-        tf.a0 = match sys_result {
+
+        let ret = match sys_result {
             Ok(ret) => ret,
             Err(()) => -1isize as usize,
         };
+        tf.a0 = ret;
+
+        // 根据 trace_mask 决定是否输出跟踪信息
+        let num = a7 as usize;
+        if num < SYSCALL_NAMES.len() {
+            // 安全地读取当前进程的 trace_mask
+            let pd = unsafe { self.data.get().as_ref().unwrap() };
+            if (pd.trace_mask & (1u32 << num as u32)) != 0 {
+                let pid = self.excl.lock().pid;
+                println!("{}: syscall {} -> {}", pid, SYSCALL_NAMES[num], ret as isize);
+            }
+        }
     }
+
 
     /// # 功能说明
     /// 让出当前进程的 CPU 使用权，将进程状态从运行中（RUNNING）
@@ -688,6 +734,9 @@ impl Proc {
         cdata.open_files.clone_from(&pdata.open_files);
         cdata.cwd.clone_from(&pdata.cwd);
         
+        // 继承父进程的 trace 掩码
+        cdata.trace_mask = pdata.trace_mask;
+
         // copy process name
         cdata.name.copy_from_slice(&pdata.name);
 
