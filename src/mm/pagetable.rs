@@ -193,6 +193,48 @@ pub struct PageTable {
 }
 
 impl PageTable {
+    // 递归打印页表
+    // level = 0 时表示从根开始，会先打印 "page table 0x..." 这一行
+    pub fn vm_print(&self, level: usize) {
+        // 根调用：打印当前页表地址
+        if level == 0 {
+            println!("page table {:#x}", self as *const PageTable as usize);
+            // 顶层页表的条目是从缩进层级 1 开始打印的（前面示例里是 `..0:`）
+            self.vm_print_inner(1);
+        } else {
+            // 如果以后内部想直接从某一层调用，也可以用非 0 level
+            self.vm_print_inner(level);
+        }
+    }
+
+    // 实际递归打印函数
+    fn vm_print_inner(&self, level: usize) {
+        for (i, pte) in self.data.iter().enumerate() {
+            // 跳过无效 PTE
+            if !pte.is_valid() {
+                continue;
+            }
+
+            // 打印缩进： ".." / ".. .." / ".. .. .." ...
+            for j in 0..level {
+                if j > 0 {
+                    print!(" ");
+                }
+                print!("..");
+            }
+
+            let pa = pte.as_phys_addr().as_usize();
+
+            // 打印当前这一项
+            println!("{}: pte {:#x} pa {:#x}", i, pte.data, pa);
+
+            // 如果不是叶子（没有 R/W/X），说明这是中间页表，递归打印子页表
+            if !pte.is_leaf() {
+                let child = unsafe { &*pte.as_page_table() };
+                child.vm_print_inner(level + 1);
+            }
+        }
+    }  
     pub const fn empty() -> Self {
         Self {
             data: array![_ => PageTableEntry { data: 0 }; 512],
